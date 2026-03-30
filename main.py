@@ -1,7 +1,10 @@
 import asyncio
 import json
 import random
-from datetime import datetime
+import tempfile
+import base64
+import os
+from datetime import datetime, date
 from typing import Optional, Dict
 
 import aiohttp
@@ -29,9 +32,15 @@ class AIDrawPlugin(Star):
         # 存储每个会话的最后一条消息
         self.session_messages: Dict[str, Dict] = {}
         
+        # 存储用户每日使用次数: {user_id: {"date": "2024-01-01", "count": 0}}
+        self.user_daily_usage: Dict[str, Dict] = {}
+        
+        # 每日最大使用次数
+        self.daily_limit = self.get_config("daily_limit", 100)
+        
         logger.info("AI绘画插件已加载")
         if self.get_config("enable_log", True):
-            logger.info("插件将记录对话并支持 AI 绘画")
+            logger.info(f"插件将记录对话并支持 AI 绘画，每日限制: {self.daily_limit} 次/用户")
     
     def get_config(self, key: str, default=None):
         """获取配置值"""
@@ -44,6 +53,51 @@ class AIDrawPlugin(Star):
             return f"group_{group_id}"
         else:
             return f"private_{event.get_sender_id()}"
+    
+    def _get_user_id(self, event: AstrMessageEvent) -> str:
+        """获取用户唯一标识"""
+        return str(event.get_sender_id())
+    
+    def _check_and_update_usage(self, user_id: str) -> tuple:
+        """检查并更新用户使用次数
+        
+        Returns:
+            (can_use, remaining_count, today_used)
+        """
+        today = date.today().isoformat()
+        
+        # 获取用户今日使用记录
+        user_data = self.user_daily_usage.get(user_id, {})
+        last_date = user_data.get("date", "")
+        used_count = user_data.get("count", 0)
+        
+        # 如果不是今天，重置计数
+        if last_date != today:
+            used_count = 0
+            user_data = {"date": today, "count": 0}
+        
+        remaining = self.daily_limit - used_count
+        
+        if used_count >= self.daily_limit:
+            return False, 0, used_count
+        
+        # 更新计数
+        user_data["count"] = used_count + 1
+        self.user_daily_usage[user_id] = user_data
+        
+        return True, remaining - 1, used_count + 1
+    
+    def _get_remaining_count(self, user_id: str) -> int:
+        """获取用户今日剩余次数"""
+        today = date.today().isoformat()
+        user_data = self.user_daily_usage.get(user_id, {})
+        last_date = user_data.get("date", "")
+        used_count = user_data.get("count", 0)
+        
+        if last_date != today:
+            return self.daily_limit
+        
+        return max(0, self.daily_limit - used_count)
     
     # ==================== LLM 配置 ====================
     
@@ -149,7 +203,7 @@ class AIDrawPlugin(Star):
                         prompt = prompt.replace("```", "").strip()
                         
                         if self.get_config("enable_log", True):
-                            logger.info(f"生成绘画提示词: {prompt}")
+                            logger.info(f"生成绘画提示词: {prompt[:200]}...")
                         return prompt
                     return None
         except Exception as e:
@@ -159,7 +213,7 @@ class AIDrawPlugin(Star):
     # ==================== 绘画 API 调用 ====================
     
     async def generate_drawing(self, prompt: str) -> Optional[str]:
-        """调用绘画 API 生成图片，返回 base64"""
+        """调用绘画 API 生成图片，返回临时文件路径"""
         api_url = self.get_config("draw_api_url", "")
         if not api_url:
             logger.warning("绘画 API URL 未配置")
@@ -196,15 +250,13 @@ class AIDrawPlugin(Star):
                     json=request_body,
                     timeout=aiohttp.ClientTimeout(total=120)
                 ) as response:
-                    # 获取响应文本
                     response_text = await response.text()
                     
-                    # 打印完整响应（前5000字符）
                     logger.info(f"绘画 API 响应状态: {response.status}")
-                    logger.info(f"绘画 API 响应内容: {response_text[:5000]}")
                     
                     if response.status != 200:
                         logger.error(f"绘画 API HTTP 错误: {response.status}")
+                        logger.error(f"响应内容: {response_text[:500]}")
                         return None
                     
                     # 尝试解析 JSON
@@ -212,17 +264,46 @@ class AIDrawPlugin(Star):
                         result = json.loads(response_text)
                     except json.JSONDecodeError as e:
                         logger.error(f"绘画 API 返回的不是 JSON: {e}")
-                        logger.error(f"完整响应: {response_text}")
+                        logger.error(f"响应内容: {response_text[:500]}")
                         return None
                     
                     if result.get("images") and len(result["images"]) > 0:
-                        return result["images"][0]
+                        image_base64 = result["images"][0]
+                        
+                        # 将 base64 保存为临时文件
+                        try:
+                            # 解码 base64
+                            image_data = base64.b64decode(image_base64)
+                            
+                            # 创建临时文件
+                            temp_file = tempfile.NamedTemporaryFile(
+                                suffix=".png", 
+                                delete=False,
+                                dir="/tmp"
+                            )
+                            temp_file.write(image_data)
+                            temp_file.close()
+                            
+                            logger.info(f"图片已保存到临时文件: {temp_file.name}")
+                            return temp_file.name
+                        except Exception as e:
+                            logger.error(f"保存图片失败: {e}")
+                            return None
                     else:
-                        logger.error(f"绘画 API 返回无图片数据: {result}")
+                        logger.error(f"绘画 API 返回无图片数据")
                         return None
         except Exception as e:
             logger.error(f"绘画 API 调用失败: {e}")
             return None
+    
+    def _cleanup_temp_file(self, file_path: str):
+        """清理临时文件"""
+        try:
+            if file_path and os.path.exists(file_path):
+                os.unlink(file_path)
+                logger.debug(f"已删除临时文件: {file_path}")
+        except Exception as e:
+            logger.debug(f"删除临时文件失败: {e}")
     
     # ==================== 主动绘画命令 ====================
     
@@ -235,6 +316,17 @@ class AIDrawPlugin(Star):
         
         session_key = self._get_session_key(event)
         session_data = self.session_messages.get(session_key, {})
+        user_id = self._get_user_id(event)
+        
+        # 检查每日使用次数限制
+        can_use, remaining, today_used = self._check_and_update_usage(user_id)
+        if not can_use:
+            yield event.plain_result(
+                f"❌ 您今日的绘画次数已用完！\n\n"
+                f"📊 今日已使用: {today_used}/{self.daily_limit} 次\n"
+                f"🕐 请明天再试，或联系管理员调整限制。"
+            )
+            return
         
         # 检查 LLM 配置
         llm_config = self.get_llm_config()
@@ -256,50 +348,63 @@ class AIDrawPlugin(Star):
             )
             return
         
-        # 如果没有输入描述，使用上次对话
-        if not user_input:
-            user_msg = session_data.get("user_message", "")
-            bot_reply = session_data.get("bot_reply", "")
-            
-            if not user_msg or not bot_reply:
-                yield event.plain_result(
-                    "📭 没有找到可用的对话记录。\n\n"
-                    "使用方法：\n"
-                    "1. 先与机器人对话，然后发送 /draw\n"
-                    "2. 或直接发送：/draw 一只猫在阳光下睡觉"
-                )
-                return
-            
-            yield event.plain_result("🎨 正在根据上次对话生成绘画，请稍候...")
-            
-            prompt = await self.call_llm(user_msg, bot_reply)
-            if not prompt:
-                yield event.plain_result("❌ 绘画提示词生成失败，请稍后重试")
-                return
-            
-            image_base64 = await self.generate_drawing(prompt)
-            if image_base64:
-                yield event.plain_result("🎨 根据对话生成的绘画：")
-                yield event.image_result(f"base64://{image_base64}")
-            else:
-                yield event.plain_result("❌ 绘画生成失败，请检查绘画 API 配置")
-        else:
-            yield event.plain_result("🎨 正在生成绘画，请稍候...")
-            
-            use_simple = self.get_config("use_simple_prompt", False)
-            if use_simple:
-                prompt = f"{user_input}, firefly (honkai star rail), 1girl, best quality, masterpiece"
-            else:
-                prompt = await self.call_llm(user_input, "")
+        temp_file_path = None
+        
+        try:
+            # 如果没有输入描述，使用上次对话
+            if not user_input:
+                user_msg = session_data.get("user_message", "")
+                bot_reply = session_data.get("bot_reply", "")
+                
+                if not user_msg or not bot_reply:
+                    yield event.plain_result(
+                        f"📭 没有找到可用的对话记录。\n\n"
+                        f"使用方法：\n"
+                        f"1. 先与机器人对话，然后发送 /draw\n"
+                        f"2. 或直接发送：/draw 一只猫在阳光下睡觉\n\n"
+                        f"📊 今日剩余次数: {remaining} 次"
+                    )
+                    return
+                
+                yield event.plain_result(f"🎨 正在根据上次对话生成绘画，请稍候...\n📊 今日剩余次数: {remaining} 次")
+                
+                prompt = await self.call_llm(user_msg, bot_reply)
                 if not prompt:
-                    prompt = f"{user_input}, firefly (honkai star rail), 1girl, best quality, masterpiece"
-            
-            image_base64 = await self.generate_drawing(prompt)
-            if image_base64:
-                yield event.plain_result("🎨 绘画生成成功")
-                yield event.image_result(f"base64://{image_base64}")
+                    yield event.plain_result("❌ 绘画提示词生成失败，请稍后重试")
+                    return
+                
+                temp_file_path = await self.generate_drawing(prompt)
+                if temp_file_path:
+                    yield event.plain_result("🎨 根据对话生成的绘画：")
+                    yield event.image_result(f"file://{temp_file_path}")
+                else:
+                    yield event.plain_result("❌ 绘画生成失败，请检查绘画 API 配置")
             else:
-                yield event.plain_result("❌ 绘画生成失败，请检查绘画 API 配置")
+                yield event.plain_result(f"🎨 正在生成绘画，请稍候...\n📊 今日剩余次数: {remaining} 次")
+                
+                use_simple = self.get_config("use_simple_prompt", False)
+                if use_simple:
+                    prompt = f"{user_input}, firefly (honkai star rail), 1girl, best quality, masterpiece"
+                else:
+                    prompt = await self.call_llm(user_input, "")
+                    if not prompt:
+                        prompt = f"{user_input}, firefly (honkai star rail), 1girl, best quality, masterpiece"
+                
+                temp_file_path = await self.generate_drawing(prompt)
+                if temp_file_path:
+                    yield event.plain_result("🎨 绘画生成成功")
+                    yield event.image_result(f"file://{temp_file_path}")
+                else:
+                    yield event.plain_result("❌ 绘画生成失败，请检查绘画 API 配置")
+        finally:
+            # 清理临时文件（延迟30秒后删除，确保图片已发送）
+            if temp_file_path:
+                asyncio.create_task(self._delayed_cleanup(temp_file_path, delay=30))
+    
+    async def _delayed_cleanup(self, file_path: str, delay: int = 30):
+        """延迟删除临时文件"""
+        await asyncio.sleep(delay)
+        self._cleanup_temp_file(file_path)
     
     # ==================== 监听机器人回复 ====================
     
@@ -348,6 +453,7 @@ class AIDrawPlugin(Star):
     
     async def _auto_draw_async(self, event: AstrMessageEvent, user_msg: str, bot_reply: str, session_key: str):
         """异步自动生成绘画"""
+        temp_file_path = None
         try:
             # 检查配置
             if not self.get_config("draw_api_url", ""):
@@ -355,17 +461,27 @@ class AIDrawPlugin(Star):
             if not self.get_config("llm_api_key", ""):
                 return
             
+            # 检查用户每日次数
+            user_id = self._get_user_id(event)
+            can_use, _, _ = self._check_and_update_usage(user_id)
+            if not can_use:
+                logger.info(f"用户 {user_id} 今日次数已用完，跳过自动绘画")
+                return
+            
             prompt = await self.call_llm(user_msg, bot_reply)
             if not prompt:
                 return
             
-            image_base64 = await self.generate_drawing(prompt)
-            if image_base64:
+            temp_file_path = await self.generate_drawing(prompt)
+            if temp_file_path:
                 await event.send(event.plain_result("🎨 根据对话自动生成的绘画："))
-                await event.send(event.image_result(f"base64://{image_base64}"))
+                await event.send(event.image_result(f"file://{temp_file_path}"))
                 logger.info("自动绘画生成成功")
         except Exception as e:
             logger.error(f"自动绘画失败: {e}")
+        finally:
+            if temp_file_path:
+                asyncio.create_task(self._delayed_cleanup(temp_file_path, delay=30))
     
     # ==================== 状态查询命令 ====================
     
@@ -374,6 +490,8 @@ class AIDrawPlugin(Star):
         """查看绘画插件状态"""
         session_key = self._get_session_key(event)
         session_data = self.session_messages.get(session_key, {})
+        user_id = self._get_user_id(event)
+        remaining = self._get_remaining_count(user_id)
         
         auto_draw = self.get_config("auto_draw", False)
         use_simple = self.get_config("use_simple_prompt", False)
@@ -386,10 +504,12 @@ class AIDrawPlugin(Star):
             f"🖼️ 绘画API: {'✅ 已配置' if api_url else '❌ 未配置'}\n"
             f"🤖 LLM API: {'✅ 已配置' if llm_api_key else '❌ 未配置'}\n"
             f"🎨 自动绘画: {'✅ 开启' if auto_draw else '❌ 关闭'}\n"
-            f"📝 提示词模式: {'简化模式' if use_simple else '完整模式'}\n\n"
+            f"📝 提示词模式: {'简化模式' if use_simple else '完整模式'}\n"
+            f"📊 每日限制: {self.daily_limit} 次/用户\n"
+            f"🎫 今日剩余: {remaining} 次\n\n"
             f"📊 当前会话:\n"
-            f"  - 最后用户消息: {session_data.get('user_message', '无')[:1000] if session_data.get('user_message') else '无'}\n"
-            f"  - 最后机器人回复: {session_data.get('bot_reply', '无')[:1000] if session_data.get('bot_reply') else '无'}\n\n"
+            f"  - 最后用户消息: {session_data.get('user_message', '无')[:100] if session_data.get('user_message') else '无'}...\n"
+            f"  - 最后机器人回复: {session_data.get('bot_reply', '无')[:100] if session_data.get('bot_reply') else '无'}...\n\n"
             f"💡 命令:\n"
             f"  - /draw: 根据上次对话生成绘画\n"
             f"  - /draw <描述>: 根据描述生成绘画\n"
@@ -414,7 +534,11 @@ class AIDrawPlugin(Star):
             "  • `draw_api_url` - 绘画 API 地址（必需）\n"
             "  • `auto_draw` - 是否自动生成绘画\n"
             "  • `draw_steps` - 绘画步数\n"
-            "  • `draw_cfg_scale` - 提示词相关性\n\n"
+            "  • `draw_cfg_scale` - 提示词相关性\n"
+            "  • `daily_limit` - 每日绘画次数限制（默认100）\n\n"
+            "📊 **使用限制:**\n"
+            f"  • 每个用户每天最多 {self.get_config('daily_limit', 100)} 次绘画\n"
+            "  • 次数每天零点重置\n\n"
             "💡 **示例:**\n"
             "  • 先与机器人对话，然后发送 `/draw`\n"
             "  • 直接发送 `/draw 流萤在花海中微笑`"
