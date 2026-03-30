@@ -165,7 +165,28 @@ class AIDrawPlugin(Star):
             logger.warning("绘画 API URL 未配置")
             return None
         
-        # ... 构建 request_body 的代码保持不变 ...
+        # 随机选择图片尺寸
+        if random.choice([True, False]):
+            width, height = 896, 1296
+        else:
+            width, height = 1296, 896
+        
+        # 获取负面提示词
+        negative_prompt = self.get_config("negative_prompt", "")
+        if not negative_prompt:
+            negative_prompt = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, ugly, duplicate, morbid, mutilated, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, dark, gloomy, winter"
+        
+        # 构建请求体
+        request_body = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "width": width,
+            "height": height,
+            "steps": self.get_config("draw_steps", 42),
+            "cfg_scale": self.get_config("draw_cfg_scale", 8),
+            "sampler_name": self.get_config("draw_sampler", "DPM++ SDE Karras"),
+            "enable_hr": False
+        }
         
         try:
             async with aiohttp.ClientSession() as session:
