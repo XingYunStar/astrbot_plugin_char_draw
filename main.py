@@ -376,7 +376,7 @@ class AIDrawPlugin(Star):
                 temp_file_path = await self.generate_drawing(prompt)
                 if temp_file_path:
                     yield event.plain_result("🎨 根据对话生成的绘画：")
-                    yield event.image_result(f"file://{temp_file_path}")
+                    yield event.image_result(temp_file_path)
                 else:
                     yield event.plain_result("❌ 绘画生成失败，请检查绘画 API 配置")
             else:
@@ -393,7 +393,7 @@ class AIDrawPlugin(Star):
                 temp_file_path = await self.generate_drawing(prompt)
                 if temp_file_path:
                     yield event.plain_result("🎨 绘画生成成功")
-                    yield event.image_result(f"file://{temp_file_path}")
+                    yield event.image_result(temp_file_path)
                 else:
                     yield event.plain_result("❌ 绘画生成失败，请检查绘画 API 配置")
         finally:
@@ -475,7 +475,7 @@ class AIDrawPlugin(Star):
             temp_file_path = await self.generate_drawing(prompt)
             if temp_file_path:
                 await event.send(event.plain_result("🎨 根据对话自动生成的绘画："))
-                await event.send(event.image_result(f"file://{temp_file_path}"))
+                await event.send(event.image_result(temp_file_path))
                 logger.info("自动绘画生成成功")
         except Exception as e:
             logger.error(f"自动绘画失败: {e}")
