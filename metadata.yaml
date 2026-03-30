@@ -1,0 +1,5 @@
+name: "上次回复记录插件"
+version: "1.0.0"
+description: "获取上次对话回复并在控制台打印出来，便于调试和监控"
+author: "星陨"
+repo: "https://github.com/XingYunStar/astrbot_plugin_last_reply_logger"
