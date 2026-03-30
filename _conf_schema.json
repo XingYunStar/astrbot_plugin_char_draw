@@ -3,25 +3,25 @@
         "type": "bool",
         "description": "启用日志输出",
         "default": true,
-        "hint": "是否输出详细日志，便于调试"
+        "hint": "是否输出详细日志"
     },
     "auto_draw": {
         "type": "bool",
         "description": "自动绘画",
         "default": false,
-        "hint": "是否在机器人回复后自动生成绘画。开启后每次对话都会尝试生成图片，可能消耗较多资源。"
+        "hint": "是否在机器人回复后自动生成绘画"
     },
     "use_simple_prompt": {
         "type": "bool",
         "description": "简化提示词模式",
         "default": false,
-        "hint": "使用简化的提示词模板。开启后生成速度更快，但提示词质量可能降低。"
+        "hint": "使用简化的提示词模板"
     },
     "draw_api_url": {
         "type": "string",
         "description": "绘画API地址",
         "default": "",
-        "hint": "Stable Diffusion API 地址，例如 http://127.0.0.1:7860/sdapi/v1/txt2img。留空则无法使用绘画功能。"
+        "hint": "Stable Diffusion API 地址"
     },
     "draw_steps": {
         "type": "int",
@@ -29,7 +29,7 @@
         "default": 42,
         "minimum": 20,
         "maximum": 50,
-        "hint": "生成图片的迭代步数，越高质量越好但耗时越长。推荐 30-42。"
+        "hint": "生成图片的迭代步数"
     },
     "draw_cfg_scale": {
         "type": "int",
@@ -37,30 +37,30 @@
         "default": 8,
         "minimum": 1,
         "maximum": 15,
-        "hint": "提示词对生成结果的影响程度。值越高越贴近提示词，推荐 7-9。"
+        "hint": "提示词对生成结果的影响程度"
     },
     "draw_sampler": {
         "type": "string",
         "description": "采样器",
         "default": "DPM++ SDE Karras",
-        "hint": "绘画使用的采样算法，常用选项：DPM++ SDE Karras、Euler a、DDIM"
+        "hint": "绘画使用的采样算法"
     },
     "negative_prompt": {
         "type": "text",
         "description": "负面提示词",
-        "default": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, ugly",
-        "hint": "不希望出现在图片中的内容，多个用逗号分隔"
+        "default": "",
+        "hint": "不希望出现在图片中的内容"
     },
     "draw_system_prompt": {
         "type": "text",
-        "description": "绘画提示词生成系统提示",
-        "default": "请将我给出的文字转换为可用于AI绘画的正面提示词。\n\n要求：\n1. 动漫风格，质量极好且细节丰富\n2. 整体的tag串尽量为正面\n3. 若提供的转换文字不是正面，则帮我改成正面，并且将视图限制在人物内，不要让人物过小而显出全身\n4. 若提供的转换文字元素过少，则帮我添加丰富的tag（如人物表情、穿着、身姿、环境等）\n5. 人物tag全部使用1girl，禁止使用其他的\n6. 人物模型tag为: firefly (honkai star rail)\n7. 使用固定画师tag: artist:torino_aqua, [{artist:azuuru}]\n8. 不能出现多个人物，有且仅有 firefly (honkai star rail)\n9. 不要出现眼睛颜色的tag\n\n请确保以上要求全部实现，并回复英文tag串，不需要其他多余内容。\n\n参考tag串:\nfirefly (honkai star rail), artist:torino_aqua, [{artist:azuuru}], 1girl, solo, long_hair, breasts, looking_at_viewer, blush, bangs, skirt, shirt, long_sleeves, navel, holding, very_long_hair, collarbone, swimsuit, white_shirt, heart, bikini, outdoors, frills, parted_lips, open_clothes, sky, choker, day, cloud, water, off_shoulder, stomach, blue_sky, wet, see-through, open_shirt, black_bikini, ocean, black_choker, white_bikini, white_skirt, wading, frilled_bikini, bikini_under_clothes, bikini_skirt, best quality, highly detailed, masterpiece, ultra-detailed, illustration",
-        "hint": "用于将对话转换为绘画提示词的系统提示，支持自定义修改。\n注意：需要 LLM 输出纯英文 tag 串。"
+        "description": "绘画提示词系统提示",
+        "default": "",
+        "hint": "自定义完整模式下的系统提示词"
     },
     "simple_system_prompt": {
         "type": "text",
         "description": "简化模式系统提示",
-        "default": "请将用户输入转换为英文AI绘画提示词，动漫风格，包含 firefly (honkai star rail), 1girl, best quality, masterpiece。\n只输出英文tag串，不要其他内容。",
-        "hint": "简化模式下的系统提示，用于快速测试。"
+        "default": "",
+        "hint": "自定义简化模式下的系统提示词"
     }
 }
