@@ -11,7 +11,7 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import Aioc
     "astrbot_plugin_last_reply_logger",
     "星陨",
     "获取上次对话回复并在控制台打印",
-    "1.0.0",
+    "1.0.1",
     "https://github.com/XingYunStar/astrbot_plugin_last_reply_logger"
 )
 class LastReplyLogger(Star):
@@ -19,12 +19,15 @@ class LastReplyLogger(Star):
     
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
-        self.config = self._validate_config(config)
+        # 配置会通过 config 参数传入
+        self.config = config or {}
+        
         # 存储最后一条回复消息
         self.last_reply = {
             "message_id": None,
             "content": None,
             "session_id": None,
+            "session_type": None,
             "timestamp": None
         }
         
@@ -32,60 +35,40 @@ class LastReplyLogger(Star):
         if self.get_config("enable_log", True):
             logger.info("插件将记录机器人发送的最后一条消息")
     
-    def _validate_config(self, config: dict) -> dict:
-        """验证并规范化配置"""
-        normalized = config.copy()
-        
-        # 确保 enable_log 是布尔值
-        if "enable_log" in normalized:
-            val = normalized["enable_log"]
-            if isinstance(val, str):
-                normalized["enable_log"] = val.lower() in ("true", "yes", "1", "on")
-            elif not isinstance(val, bool):
-                normalized["enable_log"] = bool(val)
-        else:
-            normalized["enable_log"] = True
-        
-        # 确保 print_full_message 是布尔值
-        if "print_full_message" in normalized:
-            val = normalized["print_full_message"]
-            if isinstance(val, str):
-                normalized["print_full_message"] = val.lower() in ("true", "yes", "1", "on")
-            elif not isinstance(val, bool):
-                normalized["print_full_message"] = bool(val)
-        else:
-            normalized["print_full_message"] = True
-        
-        # 确保 include_private 是布尔值
-        if "include_private" in normalized:
-            val = normalized["include_private"]
-            if isinstance(val, str):
-                normalized["include_private"] = val.lower() in ("true", "yes", "1", "on")
-            elif not isinstance(val, bool):
-                normalized["include_private"] = bool(val)
-        else:
-            normalized["include_private"] = True
-        
-        # 确保 include_group 是布尔值
-        if "include_group" in normalized:
-            val = normalized["include_group"]
-            if isinstance(val, str):
-                normalized["include_group"] = val.lower() in ("true", "yes", "1", "on")
-            elif not isinstance(val, bool):
-                normalized["include_group"] = bool(val)
-        else:
-            normalized["include_group"] = True
-        
-        return normalized
-    
     def get_config(self, key: str, default=None):
         """获取配置值"""
         return self.config.get(key, default)
     
+    def _is_from_self(self, event: AstrMessageEvent) -> bool:
+        """判断消息是否来自机器人自己"""
+        try:
+            # 方法1：通过消息的 raw_message 中的 user_id 判断
+            raw_message = getattr(event.message_obj, 'raw_message', None)
+            if raw_message and isinstance(raw_message, dict):
+                user_id = raw_message.get("user_id")
+                if user_id and str(user_id) == str(event.get_self_id()):
+                    return True
+            
+            # 方法2：通过 sender 信息判断
+            sender = getattr(event.message_obj, 'sender', None)
+            if sender and isinstance(sender, dict):
+                sender_id = sender.get("user_id")
+                if sender_id and str(sender_id) == str(event.get_self_id()):
+                    return True
+            
+            # 方法3：通过消息对象属性判断
+            if hasattr(event, 'is_from_me'):
+                return event.is_from_me()
+            
+            return False
+        except Exception as e:
+            logger.debug(f"判断消息来源失败: {e}")
+            return False
+    
     def _should_record(self, event: AstrMessageEvent) -> bool:
         """判断是否应该记录此消息"""
         # 检查消息是否由机器人发送
-        if not event.is_from_self():
+        if not self._is_from_self(event):
             return False
         
         # 检查会话类型
@@ -127,11 +110,14 @@ class LastReplyLogger(Star):
         session_type = "群聊" if event.get_group_id() else "私聊"
         session_id = event.get_group_id() or event.get_sender_id()
         
+        # 获取时间
+        timestamp = getattr(event, 'get_time', lambda: "未知")()
+        
         # 构建日志信息
         log_lines = [
             "=" * 60,
             f"📨 [回复记录] {session_type} | 会话ID: {session_id}",
-            f"🕐 时间: {event.get_time()}",
+            f"🕐 时间: {timestamp}",
             f"📝 内容:"
         ]
         
@@ -163,14 +149,16 @@ class LastReplyLogger(Star):
             session_id = event.get_group_id() or event.get_sender_id()
             session_type = "group" if event.get_group_id() else "private"
             
+            # 获取时间
+            timestamp = getattr(event, 'get_time', lambda: "未知")()
+            
             # 更新最后回复记录
             self.last_reply = {
-                "message_id": event.get_message_id(),
+                "message_id": getattr(event, 'get_message_id', lambda: None)(),
                 "content": content,
                 "session_id": session_id,
                 "session_type": session_type,
-                "timestamp": event.get_time(),
-                "raw_event": event
+                "timestamp": timestamp
             }
             
             # 打印到控制台
@@ -184,11 +172,7 @@ class LastReplyLogger(Star):
     
     @filter.command("get_last_reply")
     async def get_last_reply_command(self, event: AstrMessageEvent):
-        """获取最后一条回复消息
-        
-        使用方法:
-        /get_last_reply - 查看最后一条回复的详细信息
-        """
+        """获取最后一条回复消息"""
         if self.last_reply["content"] is None:
             yield event.plain_result("📭 暂无回复记录，等待机器人发送消息后重试。")
             return
@@ -218,15 +202,12 @@ class LastReplyLogger(Star):
     @filter.command("clear_last_reply")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def clear_last_reply_command(self, event: AstrMessageEvent):
-        """清除最后一条回复记录
-        
-        使用方法:
-        /clear_last_reply - 清除存储的最后一条回复记录
-        """
+        """清除最后一条回复记录（仅管理员）"""
         self.last_reply = {
             "message_id": None,
             "content": None,
             "session_id": None,
+            "session_type": None,
             "timestamp": None
         }
         
