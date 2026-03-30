@@ -17,6 +17,14 @@
         "default": false,
         "hint": "使用简化的提示词模板"
     },
+    "daily_limit": {
+        "type": "int",
+        "description": "每日绘画次数限制",
+        "default": 100,
+        "minimum": 1,
+        "maximum": 1000,
+        "hint": "每个用户每天最多可使用的绘画次数"
+    },
     "llm_api_url": {
         "type": "string",
         "description": "LLM API地址",
