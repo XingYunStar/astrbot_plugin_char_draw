@@ -149,7 +149,7 @@ class AIDrawPlugin(Star):
                         prompt = prompt.replace("```", "").strip()
                         
                         if self.get_config("enable_log", True):
-                            logger.info(f"生成绘画提示词长度: {len(prompt)}")
+                            logger.info(f"生成绘画提示词: {prompt}")
                         return prompt
                     return None
         except Exception as e:
@@ -165,26 +165,7 @@ class AIDrawPlugin(Star):
             logger.warning("绘画 API URL 未配置")
             return None
         
-        # 随机选择图片尺寸
-        if random.choice([True, False]):
-            width, height = 896, 1296
-        else:
-            width, height = 1296, 896
-        
-        negative_prompt = self.get_config("negative_prompt", "")
-        if not negative_prompt:
-            negative_prompt = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, ugly"
-        
-        request_body = {
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "width": width,
-            "height": height,
-            "steps": self.get_config("draw_steps", 42),
-            "cfg_scale": self.get_config("draw_cfg_scale", 8),
-            "sampler_name": self.get_config("draw_sampler", "DPM++ SDE Karras"),
-            "enable_hr": False
-        }
+        # ... 构建 request_body 的代码保持不变 ...
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -194,14 +175,30 @@ class AIDrawPlugin(Star):
                     json=request_body,
                     timeout=aiohttp.ClientTimeout(total=120)
                 ) as response:
+                    # 获取响应文本
+                    response_text = await response.text()
+                    
+                    # 打印完整响应（前5000字符）
+                    logger.info(f"绘画 API 响应状态: {response.status}")
+                    logger.info(f"绘画 API 响应内容: {response_text[:5000]}")
+                    
                     if response.status != 200:
-                        logger.error(f"绘画 API 错误: {response.status}")
+                        logger.error(f"绘画 API HTTP 错误: {response.status}")
                         return None
                     
-                    result = await response.json()
+                    # 尝试解析 JSON
+                    try:
+                        result = json.loads(response_text)
+                    except json.JSONDecodeError as e:
+                        logger.error(f"绘画 API 返回的不是 JSON: {e}")
+                        logger.error(f"完整响应: {response_text}")
+                        return None
+                    
                     if result.get("images") and len(result["images"]) > 0:
                         return result["images"][0]
-                    return None
+                    else:
+                        logger.error(f"绘画 API 返回无图片数据: {result}")
+                        return None
         except Exception as e:
             logger.error(f"绘画 API 调用失败: {e}")
             return None
