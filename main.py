@@ -94,7 +94,7 @@ class AIDrawPlugin(Star):
         llm_config = self.get_llm_config()
         
         if not llm_config["api_key"]:
-            logger.error("LLM API Key 未配置，请在插件配置中填写 llm_api_key")
+            logger.error("LLM API Key 未配置")
             return None
         
         use_simple = self.get_config("use_simple_prompt", False)
@@ -103,9 +103,7 @@ class AIDrawPlugin(Star):
         if use_simple:
             user_content = f"将以下内容转换为英文绘画提示词：\n用户说：{user_message}\n机器人说：{bot_reply}"
         else:
-            user_content = f"""用户说：【{user_message}】
-
-机器人说：【{bot_reply}】"""
+            user_content = f"用户说：【{user_message}】\n\n机器人说：【{bot_reply}】"
         
         messages = [
             {"role": "system", "content": system_prompt},
@@ -114,8 +112,15 @@ class AIDrawPlugin(Star):
         
         request_body = {
             "model": llm_config["model"],
-            "messages": messages
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 8192
         }
+        
+        # 注意：这里使用完整的 API 路径
+        api_url = llm_config["api_url"]
+        if not api_url.endswith("/chat/completions"):
+            api_url = api_url.rstrip("/") + "/chat/completions"
         
         headers = {
             "Content-Type": "application/json",
@@ -125,19 +130,19 @@ class AIDrawPlugin(Star):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    llm_config["api_url"],
+                    api_url,
                     headers=headers,
                     json=request_body,
                     timeout=aiohttp.ClientTimeout(total=60)
                 ) as response:
                     if response.status != 200:
-                        logger.error(f"LLM API 错误: {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"LLM API 错误: {response.status}, {error_text}")
                         return None
                     
                     data = await response.json()
                     if data.get("choices") and len(data["choices"]) > 0:
                         prompt = data["choices"][0]["message"]["content"].strip()
-                        # 移除可能的 markdown 代码块标记
                         if prompt.startswith("```"):
                             lines = prompt.split("\n")
                             prompt = "\n".join(lines[1:-1]) if len(lines) > 2 else prompt
@@ -365,8 +370,8 @@ class AIDrawPlugin(Star):
             f"🎨 自动绘画: {'✅ 开启' if auto_draw else '❌ 关闭'}\n"
             f"📝 提示词模式: {'简化模式' if use_simple else '完整模式'}\n\n"
             f"📊 当前会话:\n"
-            f"  - 最后用户消息: {session_data.get('user_message', '无')[:50] if session_data.get('user_message') else '无'}\n"
-            f"  - 最后机器人回复: {session_data.get('bot_reply', '无')[:50] if session_data.get('bot_reply') else '无'}\n\n"
+            f"  - 最后用户消息: {session_data.get('user_message', '无')[:1000] if session_data.get('user_message') else '无'}\n"
+            f"  - 最后机器人回复: {session_data.get('bot_reply', '无')[:1000] if session_data.get('bot_reply') else '无'}\n\n"
             f"💡 命令:\n"
             f"  - /draw: 根据上次对话生成绘画\n"
             f"  - /draw <描述>: 根据描述生成绘画\n"
