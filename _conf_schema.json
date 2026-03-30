@@ -1,0 +1,26 @@
+{
+    "enable_log": {
+        "type": "bool",
+        "description": "启用日志输出",
+        "default": true,
+        "hint": "是否在控制台打印回复消息。关闭后仍可通过 /get_last_reply 命令查看。"
+    },
+    "print_full_message": {
+        "type": "bool",
+        "description": "打印完整消息",
+        "default": true,
+        "hint": "是否打印完整消息内容。关闭则只打印前100个字符。"
+    },
+    "include_private": {
+        "type": "bool",
+        "description": "记录私聊回复",
+        "default": true,
+        "hint": "是否记录私聊会话中的回复消息。"
+    },
+    "include_group": {
+        "type": "bool",
+        "description": "记录群聊回复",
+        "default": true,
+        "hint": "是否记录群聊会话中的回复消息。"
+    }
+}
